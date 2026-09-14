@@ -1,31 +1,55 @@
+// --- Procedural Humanoid Character ---
 const player = new THREE.Group();
-const body = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.45, 0.45, 1.3, 12),
-  new THREE.MeshStandardMaterial({ color: 0xf0c29a })
-);
-body.position.y = 0.65 + 0.45;
-body.castShadow = true;
-player.add(body);
 
-const head = new THREE.Mesh(
-  new THREE.SphereGeometry(0.4, 14, 14),
-  new THREE.MeshStandardMaterial({ color: 0xf0c29a })
-);
-head.position.y = 1.1 + 0.45 + 0.4;
+// Materials
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xf0c29a });
+const shirtMat = new THREE.MeshStandardMaterial({ color: 0x2563eb });
+const pantsMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+
+// Torso
+const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), shirtMat);
+torso.position.y = 1.35;
+torso.castShadow = true;
+player.add(torso);
+
+// Head
+const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), skinMat);
+head.position.y = 0.65;
 head.castShadow = true;
-player.add(head);
+torso.add(head);
 
-const nose = new THREE.Mesh(
-  new THREE.ConeGeometry(0.12, 0.3, 8),
-  new THREE.MeshStandardMaterial({ color: 0x333333 })
-);
-nose.rotation.x = Math.PI / 2;
-nose.position.set(0, 1.55, 0.4);
-player.add(nose);
+// Left & Right Arms (Pivoted at shoulder)
+const armGeo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
+armGeo.translate(0, -0.3, 0); // Shift origin to shoulder joint
+
+const leftArm = new THREE.Mesh(armGeo, shirtMat);
+leftArm.position.set(0.45, 0.35, 0);
+leftArm.castShadow = true;
+torso.add(leftArm);
+
+const rightArm = new THREE.Mesh(armGeo, shirtMat);
+rightArm.position.set(-0.45, 0.35, 0);
+rightArm.castShadow = true;
+torso.add(rightArm);
+
+// Left & Right Legs (Pivoted at hip)
+const legGeo = new THREE.BoxGeometry(0.25, 0.8, 0.25);
+legGeo.translate(0, -0.4, 0); // Shift origin to hip joint
+
+const leftLeg = new THREE.Mesh(legGeo, pantsMat);
+leftLeg.position.set(0.2, 0.9, 0);
+leftLeg.castShadow = true;
+player.add(leftLeg);
+
+const rightLeg = new THREE.Mesh(legGeo, pantsMat);
+rightLeg.position.set(-0.2, 0.9, 0);
+rightLeg.castShadow = true;
+player.add(rightLeg);
 
 player.position.set(0, 0, 15);
 scene.add(player);
 
+// State & Constants
 const playerState = { velocityY: 0, grounded: true, turnSpeed: 2.6 };
 const GROUND_Y = 0;
 const GRAVITY = -28;
@@ -39,6 +63,24 @@ const CAR_FRICTION = 6;
 const CAR_MAX_YAW_RATE = 2.0;
 
 const drivingState = { active: false, vehicle: null };
+
+// --- Walk Cycle Animation ---
+let walkTime = 0;
+
+function animateHumanoid(dt, isMoving) {
+  if (isMoving) {
+    walkTime += dt * 10;
+    leftArm.rotation.x = Math.sin(walkTime) * 0.6;
+    rightArm.rotation.x = -Math.sin(walkTime) * 0.6;
+    leftLeg.rotation.x = -Math.sin(walkTime) * 0.7;
+    rightLeg.rotation.x = Math.sin(walkTime) * 0.7;
+  } else {
+    leftArm.rotation.x *= 0.8;
+    rightArm.rotation.x *= 0.8;
+    leftLeg.rotation.x *= 0.8;
+    rightLeg.rotation.x *= 0.8;
+  }
+}
 
 function updatePlayer(dt) {
   if (drivingState.active) return;
@@ -62,6 +104,9 @@ function updatePlayer(dt) {
       player.position.z = clampedZ;
     }
   }
+
+  // Animate character limbs based on movement
+  animateHumanoid(dt, moveDir !== 0);
 
   if (shiftJustPressed && playerState.grounded) {
     playerState.velocityY = JUMP_SPEED;
