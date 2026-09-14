@@ -2,13 +2,16 @@ const promptEl = document.getElementById('prompt');
 const modalEl = document.getElementById('modal');
 const modalTitle = document.getElementById('modalTitle');
 const modalBody = document.getElementById('modalBody');
+const noteEl = document.getElementById('crosshair-note');
 
 let isLocked = false;
 let cameraPitch = 0.25;
 let nearest = null;
 let modalOpen = false;
 
-document.body.addEventListener('click', () => {
+document.body.addEventListener('click', (e) => {
+  // Avoid requesting pointer lock when clicking UI elements
+  if (e.target.closest('#hud, #modal, #touch-overlay, #crosshair-note')) return;
   if (!modalOpen && !isLocked) {
     document.body.requestPointerLock();
   }
@@ -65,41 +68,39 @@ let joyTouchId = null;
 let joyCenter = { x: 0, y: 0 };
 const maxRadius = 40;
 
-joyZone.addEventListener('touchstart', (e) => {
-  // Trigger Fullscreen & Landscape lock on first interaction
-  tryFullscreenAndLock();
+if (joyZone) {
+  joyZone.addEventListener('touchstart', (e) => {
+    const touch = e.changedTouches[0];
+    joyTouchId = touch.identifier;
+    joyActive = true;
+    const rect = joyZone.getBoundingClientRect();
+    joyCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    updateJoystick(touch.clientX, touch.clientY);
+  }, { passive: false });
 
-  const touch = e.changedTouches[0];
-  joyTouchId = touch.identifier;
-  joyActive = true;
-  const rect = joyZone.getBoundingClientRect();
-  joyCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  updateJoystick(touch.clientX, touch.clientY);
-}, { passive: false });
-
-window.addEventListener('touchmove', (e) => {
-  if (!joyActive) return;
-  for (let touch of e.changedTouches) {
-    if (touch.identifier === joyTouchId) {
-      updateJoystick(touch.clientX, touch.clientY);
+  window.addEventListener('touchmove', (e) => {
+    if (!joyActive) return;
+    for (let touch of e.changedTouches) {
+      if (touch.identifier === joyTouchId) {
+        updateJoystick(touch.clientX, touch.clientY);
+      }
     }
-  }
-}, { passive: false });
+  }, { passive: false });
 
-const resetJoystick = (e) => {
-  if (!joyActive) return;
-  for (let touch of e.changedTouches) {
-    if (touch.identifier === joyTouchId) {
-      joyActive = false;
-      joyKnob.style.transform = `translate(-50%, -50%)`;
-      // Clear movement keys
-      keys.w = false; keys.s = false; keys.a = false; keys.d = false;
+  const resetJoystick = (e) => {
+    if (!joyActive) return;
+    for (let touch of e.changedTouches) {
+      if (touch.identifier === joyTouchId) {
+        joyActive = false;
+        joyKnob.style.transform = `translate(-50%, -50%)`;
+        keys.w = false; keys.s = false; keys.a = false; keys.d = false;
+      }
     }
-  }
-};
+  };
 
-window.addEventListener('touchend', resetJoystick);
-window.addEventListener('touchcancel', resetJoystick);
+  window.addEventListener('touchend', resetJoystick);
+  window.addEventListener('touchcancel', resetJoystick);
+}
 
 function updateJoystick(clientX, clientY) {
   let dx = clientX - joyCenter.x;
@@ -113,7 +114,6 @@ function updateJoystick(clientX, clientY) {
 
   joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
 
-  // Map joystick deflection to WASD keys
   const threshold = 12;
   keys.w = dy < -threshold;
   keys.s = dy > threshold;
@@ -125,25 +125,43 @@ function updateJoystick(clientX, clientY) {
 const btnJump = document.getElementById('btn-jump');
 const btnAction = document.getElementById('btn-action');
 
-btnJump.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  if (!keys.shift) shiftJustPressed = true;
-  keys.shift = true;
-});
-btnJump.addEventListener('touchend', () => { keys.shift = false; });
+if (btnJump && btnAction) {
+  btnJump.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (!keys.shift) shiftJustPressed = true;
+    keys.shift = true;
+  });
+  btnJump.addEventListener('touchend', () => { keys.shift = false; });
 
-btnAction.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  spaceJustPressed = true;
-});
+  btnAction.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    spaceJustPressed = true;
+  });
+}
 
-// --- Lock Landscape & Hide Browser Chrome ---
-function tryFullscreenAndLock() {
-  if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen().then(() => {
-      if (screen.orientation && screen.orientation.lock) {
-        screen.orientation.lock('landscape').catch(() => {});
+// --- Service Worker Unregister & Hard Reload ---
+if (noteEl) {
+  noteEl.addEventListener('click', async (e) => {
+    e.stopPropagation();
+
+    const confirmed = confirm("Warning: This will unregister the Service Worker, clear cache, and reload from the server. Continue?");
+    if (!confirmed) return;
+
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (let registration of registrations) {
+        await registration.unregister();
       }
-    }).catch(() => {});
-  }
+    }
+
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      for (let key of keys) {
+        await caches.delete(key);
+      }
+    }
+
+    // Force fetch from server bypassing browser cache
+    window.location.reload(true);
+  });
 }
