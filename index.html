@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Open World POC</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #7ec8e3; font-family: 'Segoe UI', system-ui, sans-serif; }
+  canvas { display: block; }
+
+  #hud {
+    position: fixed; top: 16px; left: 16px;
+    color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    font-size: 13px; line-height: 1.6; pointer-events: none;
+    background: rgba(10, 14, 20, 0.35);
+    padding: 10px 14px; border-radius: 6px;
+    backdrop-filter: blur(2px);
+  }
+  #hud b { font-weight: 600; letter-spacing: 0.3px; }
+
+  #prompt {
+    position: fixed; bottom: 14%; left: 50%; transform: translateX(-50%) translateY(8px);
+    color: #fff; background: rgba(10, 14, 20, 0.72);
+    padding: 8px 18px; border-radius: 20px;
+    font-size: 14px; font-weight: 500;
+    opacity: 0; transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none; white-space: nowrap;
+  }
+  #prompt.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #prompt kbd {
+    background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.3);
+    padding: 1px 7px; border-radius: 4px; font-size: 12px; margin: 0 2px;
+  }
+
+  #modal {
+    position: fixed; inset: 0; background: rgba(6, 8, 12, 0.55);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+    z-index: 10;
+  }
+  #modal.show { opacity: 1; pointer-events: auto; }
+  #modalCard {
+    background: #14181f; color: #eee; padding: 28px 32px;
+    border-radius: 10px; max-width: 360px; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    transform: translateY(8px); transition: transform 0.2s ease;
+  }
+  #modal.show #modalCard { transform: translateY(0); }
+  #modalCard h2 { font-size: 18px; margin-bottom: 8px; font-weight: 600; }
+  #modalCard p { font-size: 14px; color: #aab; line-height: 1.5; margin-bottom: 16px; }
+  #modalCard button {
+    background: #4a90d9; color: #fff; border: none; padding: 8px 20px;
+    border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500;
+  }
+  #modalCard button:hover { background: #5c9de0; }
+
+  #crosshair-note {
+    position: fixed; top: 16px; right: 16px; color: rgba(255,255,255,0.75);
+    font-size: 12px; text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+  }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div><b>W/S</b> forward / back &nbsp; <b>A/D</b> turn &nbsp; <b>SHIFT</b> jump &nbsp; <b>SPACE</b> interact / exit car &nbsp; <b>CLICK</b> lock mouse</div>
+</div>
+<div id="crosshair-note">proof of concept &mdash; complete world collisions</div>
+
+<div id="prompt"></div>
+
+<div id="modal">
+  <div id="modalCard">
+    <h2 id="modalTitle">Building</h2>
+    <p id="modalBody">Interior not built yet in this proof of concept.</p>
+    <button onclick="closeModal()">Close</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---------- Setup ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fd0ec);
+scene.fog = new THREE.Fog(0x8fd0ec, 60, 220);
+
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------- Lighting ----------
+const hemi = new THREE.HemisphereLight(0xffffff, 0x444455, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff3d6, 1.0);
+sun.position.set(60, 90, 30);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -100;
+sun.shadow.camera.right = 100;
+sun.shadow.camera.top = 100;
+sun.shadow.camera.bottom = -100;
+scene.add(sun);
+
+// ---------- Ground: streets + blocks ----------
+const groundSize = 240;
+const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x5b8a3a, roughness: 1 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+function makeRoad(w, h, x, z) {
+  const road = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshStandardMaterial({ color: 0x2b2b30, roughness: 0.9 })
+  );
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(x, 0.02, z);
+  road.receiveShadow = true;
+  scene.add(road);
+}
+makeRoad(groundSize, 10, 0, 0);
+makeRoad(10, groundSize, 0, 0);
+makeRoad(groundSize, 10, 0, 50);
+makeRoad(10, groundSize, 50, 0);
+makeRoad(groundSize, 10, 0, -50);
+makeRoad(10, groundSize, -50, 0);
+
+for (let i = -groundSize/2; i < groundSize/2; i += 6) {
+  const mark = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.4, 0.4),
+    new THREE.MeshStandardMaterial({ color: 0xdddddd })
+  );
+  mark.rotation.x = -Math.PI / 2;
+  mark.position.set(i, 0.03, 0.05);
+  scene.add(mark);
+  const mark2 = mark.clone();
+  mark2.rotation.z = Math.PI/2;
+  mark2.position.set(0.05, 0.03, i);
+  scene.add(mark2);
+}
+
+// ---------- Obstacles & Interactables ----------
+const interactables = [];
+const buildingBoxes = [];
+const treeObstacles = [];
+
+function makeBuilding(x, z, w, d, h, color, name, blurb) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, h/2, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 1.02, 0.4, d * 1.02),
+    new THREE.MeshStandardMaterial({ color: 0x2c2c2c })
+  );
+  roof.position.set(x, h + 0.2, z);
+  roof.castShadow = true;
+  scene.add(roof);
+
+  const data = {
+    mesh, x, z, radius: Math.max(w, d) / 2 + 3.5,
+    name, blurb, type: 'building'
+  };
+  interactables.push(data);
+
+  buildingBoxes.push({
+    minX: x - w / 2,
+    maxX: x + w / 2,
+    minZ: z - d / 2,
+    maxZ: z + d / 2
+  });
+
+  return data;
+}
+
+function makeVehicle(x, z, color, name) {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(2.2, 0.9, 4.2),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.3 })
+  );
+  body.position.y = 0.7;
+  body.castShadow = true;
+  group.add(body);
+
+  const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(1.9, 0.7, 2.0),
+    new THREE.MeshStandardMaterial({ color: 0xbfd8e8, roughness: 0.2, metalness: 0.1 })
+  );
+  cabin.position.set(0, 1.35, -0.2);
+  cabin.castShadow = true;
+  group.add(cabin);
+
+  const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.4, 16);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  const wheelPositions = [[-1.1, 0.4, 1.4], [1.1, 0.4, 1.4], [-1.1, 0.4, -1.4], [1.1, 0.4, -1.4]];
+  wheelPositions.forEach(p => {
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(...p);
+    wheel.castShadow = true;
+    group.add(wheel);
+  });
+
+  group.position.set(x, 0, z);
+  scene.add(group);
+
+  interactables.push({
+    mesh: group, x, z, radius: 4.5,
+    name, type: 'vehicle',
+    speed: 0
+  });
+}
+
+makeBuilding(-25, -25, 14, 14, 10, 0xb5533c, "Corner Store", "A small shop on the block. Interior not built yet in this POC.");
+makeBuilding(25, -25, 16, 12, 16, 0x4a6b8a, "Apartment Block", "Several floors of apartments. Interior not built yet in this POC.");
+makeBuilding(-25, 25, 12, 12, 7, 0xd9a441, "Diner", "Smells like pancakes, hypothetically. Interior not built yet in this POC.");
+makeBuilding(25, 25, 18, 14, 22, 0x6b7280, "Office Tower", "The tallest building around. Interior not built yet in this POC.");
+makeBuilding(-75, 0, 12, 20, 9, 0x8a5fa3, "Library", "Quiet, presumably. Interior not built yet in this POC.");
+makeBuilding(75, 0, 20, 12, 8, 0x3f9977, "Gym", "Interior not built yet in this POC.");
+makeBuilding(0, -85, 14, 14, 12, 0xc25b8f, "Community Center", "Interior not built yet in this POC.");
+makeBuilding(0, 85, 16, 16, 13, 0x556b8a, "Theater", "Interior not built yet in this POC.");
+
+makeVehicle(8, 12, 0xd64545, "Sedan");
+makeVehicle(-14, 40, 0x3560c9, "Pickup Truck");
+makeVehicle(40, -12, 0xe0c23c, "Taxi");
+
+function makeTree(x, z) {
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.3, 0.4, 2.2, 8),
+    new THREE.MeshStandardMaterial({ color: 0x6b4a2f })
+  );
+  trunk.position.set(x, 1.1, z);
+  trunk.castShadow = true;
+  scene.add(trunk);
+  const leaves = new THREE.Mesh(
+    new THREE.SphereGeometry(1.6, 10, 10),
+    new THREE.MeshStandardMaterial({ color: 0x2f7a3f })
+  );
+  leaves.position.set(x, 3.0, z);
+  leaves.castShadow = true;
+  scene.add(leaves);
+
+  treeObstacles.push({ x, z, radius: 0.8 });
+}
+
+for (let i = 0; i < 24; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const r = 15 + Math.random() * 95;
+  const x = Math.cos(angle) * r;
+  const z = Math.sin(angle) * r;
+  if (Math.abs(x) < 7 || Math.abs(z) < 7 || Math.abs(x-50) < 7 || Math.abs(x+50) < 7 || Math.abs(z-50) < 7 || Math.abs(z+50) < 7) continue;
+  makeTree(x, z);
+}
+
+// ---------- Player ----------
+const player = new THREE.Group();
+const body = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.45, 0.45, 1.3, 12),
+  new THREE.MeshStandardMaterial({ color: 0xf0c29a })
+);
+body.position.y = 0.65 + 0.45;
+body.castShadow = true;
+player.add(body);
+const head = new THREE.Mesh(
+  new THREE.SphereGeometry(0.4, 14, 14),
+  new THREE.MeshStandardMaterial({ color: 0xf0c29a })
+);
+head.position.y = 1.1 + 0.45 + 0.4;
+head.castShadow = true;
+player.add(head);
+const nose = new THREE.Mesh(
+  new THREE.ConeGeometry(0.12, 0.3, 8),
+  new THREE.MeshStandardMaterial({ color: 0x333333 })
+);
+nose.rotation.x = Math.PI / 2;
+nose.position.set(0, 1.55, 0.4);
+player.add(nose);
+
+player.position.set(0, 0, 15);
+scene.add(player);
+
+const playerState = {
+  velocityY: 0,
+  grounded: true,
+  turnSpeed: 2.6
+};
+
+const GROUND_Y = 0;
+const GRAVITY = -28;
+const JUMP_SPEED = 9.5;
+const MOVE_SPEED = 8.5;
+
+// ---------- Vehicle Physics Tuning ----------
+const CAR_MAX_SPEED = 22;
+const CAR_MAX_REVERSE = 8;
+const CAR_ACCEL = 14;
+const CAR_FRICTION = 6;
+const CAR_MAX_YAW_RATE = 2.0;
+
+const drivingState = { active: false, vehicle: null };
+
+// ---------- Mouse Look / Pitch Control ----------
+let isLocked = false;
+let cameraPitch = 0.25;
+
+document.body.addEventListener('click', () => {
+  if (!modalOpen && !isLocked) {
+    document.body.requestPointerLock();
+  }
+});
+
+document.addEventListener('pointerlockchange', () => {
+  isLocked = document.pointerLockElement === document.body;
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isLocked) return;
+  const sensitivity = 0.0025;
+  cameraPitch -= e.movementY * sensitivity;
+  cameraPitch = Math.max(-Math.PI / 6, Math.min(Math.PI / 3, cameraPitch));
+});
+
+// ---------- Input ----------
+const keys = { w: false, a: false, s: false, d: false, shift: false, space: false };
+let spaceJustPressed = false;
+let shiftJustPressed = false;
+
+window.addEventListener('keydown', (e) => {
+  switch (e.key.toLowerCase()) {
+    case 'w': keys.w = true; break;
+    case 'a': keys.a = true; break;
+    case 's': keys.s = true; break;
+    case 'd': keys.d = true; break;
+    case 'shift': if (!keys.shift) shiftJustPressed = true; keys.shift = true; break;
+    case ' ': if (!keys.space) spaceJustPressed = true; keys.space = true; e.preventDefault(); break;
+  }
+});
+window.addEventListener('keyup', (e) => {
+  switch (e.key.toLowerCase()) {
+    case 'w': keys.w = false; break;
+    case 'a': keys.a = false; break;
+    case 's': keys.s = false; break;
+    case 'd': keys.d = false; break;
+    case 'shift': keys.shift = false; break;
+    case ' ': keys.space = false; break;
+  }
+});
+
+// ---------- Camera ----------
+function updateCamera() {
+  const target = drivingState.active ? drivingState.vehicle.mesh : player;
+  const distance = drivingState.active ? 11.0 : 7.0;
+  const yaw = target.rotation.y;
+
+  const offsetX = -Math.sin(yaw) * distance * Math.cos(cameraPitch);
+  const offsetZ = -Math.cos(yaw) * distance * Math.cos(cameraPitch);
+  const offsetY = distance * Math.sin(cameraPitch) + (drivingState.active ? 2.5 : 1.8);
+
+  const desiredPos = new THREE.Vector3(
+    target.position.x + offsetX,
+    target.position.y + offsetY,
+    target.position.z + offsetZ
+  );
+
+  camera.position.lerp(desiredPos, 0.15);
+  const lookTarget = target.position.clone().add(new THREE.Vector3(0, 1.4, 0));
+  camera.lookAt(lookTarget);
+}
+
+// ---------- UI & Interaction Setup ----------
+const promptEl = document.getElementById('prompt');
+const modalEl = document.getElementById('modal');
+const modalTitle = document.getElementById('modalTitle');
+const modalBody = document.getElementById('modalBody');
+let nearest = null;
+let modalOpen = false;
+
+function closeModal() {
+  modalEl.classList.remove('show');
+  modalOpen = false;
+}
+window.closeModal = closeModal;
+
+function findNearestInteractable() {
+  let best = null;
+  let bestDist = Infinity;
+  const refPos = drivingState.active ? drivingState.vehicle.mesh.position : player.position;
+
+  for (const item of interactables) {
+    const dx = refPos.x - item.x;
+    const dz = refPos.z - item.z;
+    const dist = Math.sqrt(dx*dx + dz*dz);
+    if (dist < item.radius && dist < bestDist) {
+      best = item;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+// ---------- Universal Collision Check System ----------
+function checkWorldCollisions(posX, posZ, radius) {
+  // 1. Building Check (AABB vs bounding circle)
+  for (const box of buildingBoxes) {
+    const closestX = Math.max(box.minX, Math.min(posX, box.maxX));
+    const closestZ = Math.max(box.minZ, Math.min(posZ, box.maxZ));
+    const dx = posX - closestX;
+    const dz = posZ - closestZ;
+
+    if (dx * dx + dz * dz < radius * radius) {
+      return true;
+    }
+  }
+
+  // 2. Tree Check (Sphere vs Sphere)
+  for (const tree of treeObstacles) {
+    const dx = posX - tree.x;
+    const dz = posZ - tree.z;
+    const minDist = radius + tree.radius;
+
+    if (dx * dx + dz * dz < minDist * minDist) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ---------- Vehicle Operations ----------
+function enterVehicle(v) {
+  drivingState.active = true;
+  drivingState.vehicle = v;
+  player.visible = false;
+}
+
+function exitVehicle() {
+  if (!drivingState.active) return;
+  const v = drivingState.vehicle;
+  player.position.set(v.x + 2.5, GROUND_Y, v.z);
+  player.rotation.y = v.mesh.rotation.y;
+  player.visible = true;
+  drivingState.active = false;
+  drivingState.vehicle = null;
+}
+
+function updateVehicle(dt) {
+  if (!drivingState.active) return;
+  const v = drivingState.vehicle;
+
+  const oldX = v.x;
+  const oldZ = v.z;
+
+  if (keys.w) {
+    v.speed = Math.min(v.speed + CAR_ACCEL * dt, CAR_MAX_SPEED);
+  } else if (keys.s) {
+    v.speed = Math.max(v.speed - CAR_ACCEL * dt, -CAR_MAX_REVERSE);
+  } else {
+    if (v.speed > 0) v.speed = Math.max(0, v.speed - CAR_FRICTION * dt);
+    if (v.speed < 0) v.speed = Math.min(0, v.speed + CAR_FRICTION * dt);
+  }
+
+  const turnFactor = v.speed / CAR_MAX_SPEED;
+  if (keys.a) v.mesh.rotation.y += CAR_MAX_YAW_RATE * (turnFactor || 0.5) * dt;
+  if (keys.d) v.mesh.rotation.y -= CAR_MAX_YAW_RATE * (turnFactor || 0.5) * dt;
+
+  const nextX = v.x + Math.sin(v.mesh.rotation.y) * v.speed * dt;
+  const nextZ = v.z + Math.cos(v.mesh.rotation.y) * v.speed * dt;
+
+  const bound = groundSize / 2 - 2;
+  const clampedX = Math.max(-bound, Math.min(bound, nextX));
+  const clampedZ = Math.max(-bound, Math.min(bound, nextZ));
+
+  const vehicleRadius = 1.4;
+  if (checkWorldCollisions(clampedX, clampedZ, vehicleRadius)) {
+    v.speed = 0; // Stop on collision
+  } else {
+    v.x = clampedX;
+    v.z = clampedZ;
+  }
+
+  v.mesh.position.set(v.x, 0, v.z);
+  player.position.set(v.x, v.mesh.position.y, v.z);
+}
+
+// ---------- Movement & Physics Loop ----------
+function updatePlayer(dt) {
+  if (drivingState.active) return;
+
+  const oldPos = player.position.clone();
+
+  if (keys.a) player.rotation.y += playerState.turnSpeed * dt;
+  if (keys.d) player.rotation.y -= playerState.turnSpeed * dt;
+
+  let moveDir = 0;
+  if (keys.w) moveDir += 1;
+  if (keys.s) moveDir -= 1;
+
+  if (moveDir !== 0) {
+    const nextX = player.position.x + Math.sin(player.rotation.y) * moveDir * MOVE_SPEED * dt;
+    const nextZ = player.position.z + Math.cos(player.rotation.y) * moveDir * MOVE_SPEED * dt;
+
+    const bound = groundSize / 2 - 2;
+    const clampedX = Math.max(-bound, Math.min(bound, nextX));
+    const clampedZ = Math.max(-bound, Math.min(bound, nextZ));
+
+    const playerRadius = 0.5;
+    if (!checkWorldCollisions(clampedX, clampedZ, playerRadius)) {
+      player.position.x = clampedX;
+      player.position.z = clampedZ;
+    }
+  }
+
+  // Jump
+  if (shiftJustPressed && playerState.grounded) {
+    playerState.velocityY = JUMP_SPEED;
+    playerState.grounded = false;
+  }
+  shiftJustPressed = false;
+
+  // Gravity
+  playerState.velocityY += GRAVITY * dt;
+  player.position.y += playerState.velocityY * dt;
+  if (player.position.y <= GROUND_Y) {
+    player.position.y = GROUND_Y;
+    playerState.velocityY = 0;
+    playerState.grounded = true;
+  }
+}
+
+function updateInteraction() {
+  if (drivingState.active) {
+    promptEl.innerHTML = `<kbd>SPACE</kbd> Exit vehicle`;
+    promptEl.classList.add('show');
+
+    if (spaceJustPressed) {
+      exitVehicle();
+    }
+    spaceJustPressed = false;
+    return;
+  }
+
+  if (modalOpen) return;
+  nearest = findNearestInteractable();
+
+  if (nearest) {
+    promptEl.innerHTML = `<kbd>SPACE</kbd> ${nearest.type === 'vehicle' ? 'drive' : 'enter'} ${nearest.name}`;
+    promptEl.classList.add('show');
+  } else {
+    promptEl.classList.remove('show');
+  }
+
+  if (spaceJustPressed && nearest) {
+    if (nearest.type === 'vehicle') {
+      enterVehicle(nearest);
+    } else {
+      modalTitle.textContent = nearest.name;
+      modalBody.textContent = nearest.blurb;
+      modalEl.classList.add('show');
+      modalOpen = true;
+    }
+  }
+  spaceJustPressed = false;
+}
+
+// ---------- Main Loop ----------
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  updatePlayer(dt);
+  updateVehicle(dt);
+  updateInteraction();
+  updateCamera();
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
