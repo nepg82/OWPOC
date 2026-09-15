@@ -99,7 +99,7 @@ function updatePlayer(dt) {
     const clampedX = Math.max(-bound, Math.min(bound, nextX));
     const clampedZ = Math.max(-bound, Math.min(bound, nextZ));
 
-    if (!checkWorldCollisions(clampedX, clampedZ, 0.5)) {
+    if (!checkWorldCollisions(clampedX, clampedZ, 0.5, player.position.y)) {
       player.position.x = clampedX;
       player.position.z = clampedZ;
     }
@@ -114,18 +114,28 @@ function updatePlayer(dt) {
   }
   shiftJustPressed = false;
 
+  const prevY = player.position.y;
   playerState.velocityY += GRAVITY * dt;
   player.position.y += playerState.velocityY * dt;
-  if (player.position.y <= GROUND_Y) {
-    player.position.y = GROUND_Y;
+
+  // Only snap onto a vehicle roof if we were already at/above it (i.e. falling onto
+  // it), not when merely walking into the side of a parked car at ground level.
+  const vehicleTop = findVehicleSurfaceY(player.position.x, player.position.z);
+  const landingY = (vehicleTop !== null && prevY >= vehicleTop - 0.1) ? vehicleTop : GROUND_Y;
+
+  if (player.position.y <= landingY) {
+    player.position.y = landingY;
     playerState.velocityY = 0;
     playerState.grounded = true;
+  } else {
+    playerState.grounded = false;
   }
 }
 
 function enterVehicle(v) {
   drivingState.active = true;
   drivingState.vehicle = v;
+  v.gear = 'forward';
   player.visible = false;
 }
 
@@ -142,14 +152,36 @@ function exitVehicle() {
 function updateVehicle(dt) {
   if (!drivingState.active) return;
   const v = drivingState.vehicle;
+  if (v.gear === undefined) v.gear = 'forward';
 
-  if (keys.w) {
-    v.speed = Math.min(v.speed + CAR_ACCEL * dt, CAR_MAX_SPEED);
-  } else if (keys.s) {
-    v.speed = Math.max(v.speed - CAR_ACCEL * dt, -CAR_MAX_REVERSE);
+  if (v.gear === 'forward') {
+    if (keys.w) {
+      v.speed = Math.min(v.speed + CAR_ACCEL * dt, CAR_MAX_SPEED);
+    } else if (keys.s) {
+      // Brake toward a stop. Once stopped, holding S just holds the brake;
+      // a fresh press of S (release + press again) shifts into reverse.
+      v.speed = Math.max(0, v.speed - CAR_ACCEL * dt);
+      if (v.speed === 0 && sJustPressed) {
+        v.gear = 'reverse';
+      }
+    } else {
+      if (v.speed > 0) v.speed = Math.max(0, v.speed - CAR_FRICTION * dt);
+      else if (v.speed < 0) v.speed = Math.min(0, v.speed + CAR_FRICTION * dt);
+    }
   } else {
-    if (v.speed > 0) v.speed = Math.max(0, v.speed - CAR_FRICTION * dt);
-    if (v.speed < 0) v.speed = Math.min(0, v.speed + CAR_FRICTION * dt);
+    // reverse gear
+    if (keys.s) {
+      v.speed = Math.max(v.speed - CAR_ACCEL * dt, -CAR_MAX_REVERSE);
+    } else if (keys.w) {
+      // Brake toward a stop; a fresh press of W shifts back into forward.
+      v.speed = Math.min(0, v.speed + CAR_ACCEL * dt);
+      if (v.speed === 0 && wJustPressed) {
+        v.gear = 'forward';
+      }
+    } else {
+      if (v.speed > 0) v.speed = Math.max(0, v.speed - CAR_FRICTION * dt);
+      else if (v.speed < 0) v.speed = Math.min(0, v.speed + CAR_FRICTION * dt);
+    }
   }
 
   const turnFactor = v.speed / CAR_MAX_SPEED;
@@ -162,7 +194,7 @@ function updateVehicle(dt) {
   const clampedX = Math.max(-bound, Math.min(bound, nextX));
   const clampedZ = Math.max(-bound, Math.min(bound, nextZ));
 
-  if (checkWorldCollisions(clampedX, clampedZ, 1.4)) {
+  if (checkWorldCollisions(clampedX, clampedZ, 1.4, undefined, v)) {
     v.speed = 0;
   } else {
     v.x = clampedX;

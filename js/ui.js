@@ -37,12 +37,14 @@ window.closeModal = closeModal;
 const keys = { w: false, a: false, s: false, d: false, shift: false, space: false };
 let spaceJustPressed = false;
 let shiftJustPressed = false;
+let wJustPressed = false;
+let sJustPressed = false;
 
 window.addEventListener('keydown', (e) => {
   switch (e.key.toLowerCase()) {
-    case 'w': keys.w = true; break;
+    case 'w': if (!keys.w) wJustPressed = true; keys.w = true; break;
     case 'a': keys.a = true; break;
-    case 's': keys.s = true; break;
+    case 's': if (!keys.s) sJustPressed = true; keys.s = true; break;
     case 'd': keys.d = true; break;
     case 'shift': if (!keys.shift) shiftJustPressed = true; keys.shift = true; break;
     case ' ': if (!keys.space) spaceJustPressed = true; keys.space = true; e.preventDefault(); break;
@@ -115,8 +117,14 @@ function updateJoystick(clientX, clientY) {
   joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
 
   const threshold = 12;
-  keys.w = dy < -threshold;
-  keys.s = dy > threshold;
+  const newW = dy < -threshold;
+  const newS = dy > threshold;
+
+  if (newW && !keys.w) wJustPressed = true;
+  if (newS && !keys.s) sJustPressed = true;
+
+  keys.w = newW;
+  keys.s = newS;
   keys.a = dx < -threshold;
   keys.d = dx > threshold;
 }

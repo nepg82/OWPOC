@@ -101,7 +101,81 @@ for (let i = 0; i < 24; i++) {
   makeTree(x, z);
 }
 
-function checkWorldCollisions(posX, posZ, radius) {
+// Rough footprint/heights of a car in its own local space (before rotation),
+// matching the body/cabin boxes built by makeVehicle() above. Shared by both
+// the "is this a wall" collision check and the "can I stand on this roof" check.
+const VEHICLE_BODY_HALF = { x: 1.15, z: 2.15 };
+const VEHICLE_BODY_TOP = 1.15;
+const VEHICLE_CABIN_HALF = { x: 1.0, z: 1.05 };
+const VEHICLE_CABIN_OFFSET_Z = -0.2;
+const VEHICLE_CABIN_TOP = 1.7;
+
+// Returns the roof height at a world (x,z) over a given vehicle, or null if
+// that point isn't over the vehicle at all.
+function getVehicleTopAt(v, worldX, worldZ) {
+  const dx = worldX - v.x;
+  const dz = worldZ - v.z;
+  const yaw = v.mesh.rotation.y;
+  const cos = Math.cos(-yaw);
+  const sin = Math.sin(-yaw);
+  const localX = dx * cos - dz * sin;
+  const localZ = dx * sin + dz * cos;
+
+  if (Math.abs(localX) <= VEHICLE_CABIN_HALF.x && Math.abs(localZ - VEHICLE_CABIN_OFFSET_Z) <= VEHICLE_CABIN_HALF.z) {
+    return VEHICLE_CABIN_TOP;
+  }
+  if (Math.abs(localX) <= VEHICLE_BODY_HALF.x && Math.abs(localZ) <= VEHICLE_BODY_HALF.z) {
+    return VEHICLE_BODY_TOP;
+  }
+  return null;
+}
+
+// Returns the highest vehicle roof surface under a given world position, or null.
+function findVehicleSurfaceY(worldX, worldZ) {
+  let top = null;
+  for (const item of interactables) {
+    if (item.type !== 'vehicle') continue;
+    if (drivingState.active && drivingState.vehicle === item) continue; // can't stand on the car you're driving
+    const y = getVehicleTopAt(item, worldX, worldZ);
+    if (y !== null && (top === null || y > top)) top = y;
+  }
+  return top;
+}
+
+function checkVehicleCollisions(posX, posZ, radius, posY, excludeVehicle) {
+  for (const item of interactables) {
+    if (item.type !== 'vehicle') continue;
+    if (item === excludeVehicle) continue;
+
+    const dx = posX - item.x;
+    const dz = posZ - item.z;
+    const yaw = item.mesh.rotation.y;
+    // Rotate the world-space point into the vehicle's local space so a
+    // turned car's box is still tested correctly.
+    const cos = Math.cos(-yaw);
+    const sin = Math.sin(-yaw);
+    const localX = dx * cos - dz * sin;
+    const localZ = dx * sin + dz * cos;
+
+    const closestX = Math.max(-VEHICLE_BODY_HALF.x, Math.min(localX, VEHICLE_BODY_HALF.x));
+    const closestZ = Math.max(-VEHICLE_BODY_HALF.z, Math.min(localZ, VEHICLE_BODY_HALF.z));
+    const ddx = localX - closestX;
+    const ddz = localZ - closestZ;
+    if (ddx * ddx + ddz * ddz >= radius * radius) continue; // not overlapping the footprint
+
+    // Overlapping the footprint in X/Z - but if we've already cleared the
+    // roof height at this spot (jumping/standing on top), it's not a wall.
+    if (posY !== undefined) {
+      const topHere = getVehicleTopAt(item, posX, posZ);
+      if (topHere !== null && posY >= topHere - 0.15) continue;
+    }
+
+    return true;
+  }
+  return false;
+}
+
+function checkWorldCollisions(posX, posZ, radius, posY, excludeVehicle) {
   for (const box of buildingBoxes) {
     const closestX = Math.max(box.minX, Math.min(posX, box.maxX));
     const closestZ = Math.max(box.minZ, Math.min(posZ, box.maxZ));
@@ -115,5 +189,6 @@ function checkWorldCollisions(posX, posZ, radius) {
     const minDist = radius + tree.radius;
     if (dx * dx + dz * dz < minDist * minDist) return true;
   }
+  if (checkVehicleCollisions(posX, posZ, radius, posY, excludeVehicle)) return true;
   return false;
 }

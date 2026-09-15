@@ -78,6 +78,9 @@ function animate() {
   updateInteraction();
   updateCamera();
 
+  wJustPressed = false;
+  sJustPressed = false;
+
   renderer.render(scene, camera);
 }
 
