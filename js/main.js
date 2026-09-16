@@ -97,6 +97,10 @@ function animate() {
   wJustPressed = false;
   sJustPressed = false;
 
+  const focusTarget = drivingState.active ? drivingState.vehicle.mesh : player;
+  sun.position.set(focusTarget.position.x + 60, 90, focusTarget.position.z + 30);
+  sun.target = focusTarget;
+
   renderer.render(scene, camera);
 }
 

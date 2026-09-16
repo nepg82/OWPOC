@@ -330,12 +330,27 @@ makeBlock(15, 10, { color: 0xd9b54c });
 makeBlock(20, 10, { color: 0xb5533c });
 makeBlock(25, 10, { color: 0x4a6b8a });
 
-for (let i = 0; i < 24; i++) {
+// Grid layout for additional city blocks
+const gridPositions = [-200, -150, -100, 100, 150, 200];
+const colors = [0xb5533c, 0x4a6b8a, 0xd9a441, 0x6b7280, 0x8a5fa3, 0x3f9977];
+
+gridPositions.forEach((x, i) => {
+  gridPositions.forEach((z, j) => {
+    if (Math.abs(x) < 50 && Math.abs(z) < 50) return; // Keep center area clear
+    const color = colors[(i + j) % colors.length];
+    makeBuilding(x, z, 14, 14, 10 + (i % 3) * 4, color, `Building ${x}_${z}`, "Expanded city block building.");
+  });
+});
+
+// Scale trees to 250 instances across the expanded terrain
+for (let i = 0; i < 250; i++) {
   const angle = Math.random() * Math.PI * 2;
-  const r = 15 + Math.random() * 95;
+  const r = 30 + Math.random() * 260;
   const x = Math.cos(angle) * r;
   const z = Math.sin(angle) * r;
-  if (Math.abs(x) < 7 || Math.abs(z) < 7 || Math.abs(x - 50) < 7 || Math.abs(x + 50) < 7 || Math.abs(z - 50) < 7 || Math.abs(z + 50) < 7) continue;
+
+  // Keep roads clear (assuming main road grid running near x/z multiples)
+  if (Math.abs(x % 50) < 8 || Math.abs(z % 50) < 8) continue;
   makeTree(x, z);
 }
 
@@ -347,15 +362,14 @@ for (let i = 0; i < 24; i++) {
 // currently being carried (heldByPlayer) is skipped by both, since it's
 // riding along with the player rather than sitting in the world.
 
-// Returns the top surface height at a world (x,z) over a given item, or
-// null if that point isn't over the item at all.
 function getObstacleTopAt(item, worldX, worldZ) {
   const c = item.collision;
-  const dx = worldX - item.x;
-  const dz = worldZ - item.z;
+  const dx = worldX - item.mesh.position.x;
+  const dz = worldZ - item.mesh.position.z;
   const yaw = item.mesh.rotation.y;
   const cos = Math.cos(-yaw);
   const sin = Math.sin(-yaw);
+  
   const localX = dx * cos - dz * sin;
   const localZ = dx * sin + dz * cos;
 
@@ -369,11 +383,12 @@ function getObstacleTopAt(item, worldX, worldZ) {
 }
 
 // Returns the highest standable surface under a given world position, or null.
-function findStandableSurfaceY(worldX, worldZ) {
+function findStandableSurfaceY(worldX, worldZ, excludeVehicle = null) {
   let top = null;
   for (const item of interactables) {
     if (item.type !== 'vehicle' && item.type !== 'prop') continue;
     if (item.heldByPlayer) continue;
+    if (item === excludeVehicle) continue;
     if (drivingState.active && drivingState.vehicle === item) continue; // can't stand on the car you're driving
     const y = getObstacleTopAt(item, worldX, worldZ);
     if (y !== null && (top === null || y > top)) top = y;
@@ -388,27 +403,41 @@ function checkDynamicCollisions(posX, posZ, radius, posY, excludeVehicle) {
     if (item.heldByPlayer) continue;
 
     const bodyHalf = item.collision.bodyHalf;
-    const dx = posX - item.x;
-    const dz = posZ - item.z;
+    const dx = posX - item.mesh.position.x;
+    const dz = posZ - item.mesh.position.z;
     const yaw = item.mesh.rotation.y;
-    // Rotate the world-space point into the item's local space so a
-    // turned vehicle's box is still tested correctly.
+
+    // 1. Rotate player position into the item's local orientation
     const cos = Math.cos(-yaw);
     const sin = Math.sin(-yaw);
     const localX = dx * cos - dz * sin;
     const localZ = dx * sin + dz * cos;
 
+    // 2. Clamp local position to local rotated bounding box
     const closestX = Math.max(-bodyHalf.x, Math.min(localX, bodyHalf.x));
     const closestZ = Math.max(-bodyHalf.z, Math.min(localZ, bodyHalf.z));
     const ddx = localX - closestX;
     const ddz = localZ - closestZ;
-    if (ddx * ddx + ddz * ddz >= radius * radius) continue; // not overlapping the footprint
 
-    // Overlapping the footprint in X/Z - but if we've already cleared the
-    // roof height at this spot (jumping/standing on top), it's not a wall.
+    // If outside 2D footprint, no collision
+    if (ddx * ddx + ddz * ddz >= radius * radius) continue;
+
+    // 3. Precise Local Elevation Check
     if (posY !== undefined) {
-      const topHere = getObstacleTopAt(item, posX, posZ);
-      if (topHere !== null && posY >= topHere - 0.15) continue;
+      // Get exact local top surface (cabin vs body) at current local (x, z)
+      let topHere = getObstacleTopAt(item, posX, posZ);
+      
+      // Fallback for edge cases: check max height of exact overlap region
+      if (topHere === null) {
+        const c = item.collision;
+        const isOverTop = Math.abs(localX) <= c.topHalf.x && Math.abs(localZ - c.topOffsetZ) <= c.topHalf.z;
+        topHere = isOverTop ? c.topTop : c.bodyTop;
+      }
+
+      // If feet (posY) are at or above local surface height (-0.3 margin), bypass wall collision
+      if (posY >= topHere - 0.3) {
+        continue;
+      }
     }
 
     return true;

@@ -1,6 +1,6 @@
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fd0ec);
-scene.fog = new THREE.Fog(0x8fd0ec, 60, 220);
+scene.fog = new THREE.Fog(0x8fd0ec, 60, 500);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -22,13 +22,13 @@ const sun = new THREE.DirectionalLight(0xfff3d6, 1.0);
 sun.position.set(60, 90, 30);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -100;
-sun.shadow.camera.right = 100;
-sun.shadow.camera.top = 100;
-sun.shadow.camera.bottom = -100;
+sun.shadow.camera.left = -300;
+sun.shadow.camera.right = 300;
+sun.shadow.camera.top = 300;
+sun.shadow.camera.bottom = -300;
 scene.add(sun);
 
-const groundSize = 240;
+const groundSize = 600;
 const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x5b8a3a, roughness: 1 });
 const ground = new THREE.Mesh(groundGeo, groundMat);

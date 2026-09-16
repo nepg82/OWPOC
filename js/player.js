@@ -53,7 +53,7 @@ scene.add(player);
 const playerState = { velocityY: 0, grounded: true, turnSpeed: 2.6 };
 const GROUND_Y = 0;
 const GRAVITY = -28;
-const JUMP_SPEED = 20.0;
+const JUMP_SPEED = 13.0;
 const MOVE_SPEED = 8.5;
 
 const CAR_MAX_SPEED = 22;
@@ -278,6 +278,9 @@ function updateVehicle(dt) {
 
   v.mesh.position.set(v.x, 0, v.z);
 
+  v.x = v.mesh.position.x;
+  v.z = v.mesh.position.z;
+  
   if (v.vehicleKind === 'motorcycle') {
     // Lean into turns: more lean the harder you're turning and the faster
     // you're going, eased toward the target so it doesn't snap.
