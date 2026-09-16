@@ -53,7 +53,7 @@ scene.add(player);
 const playerState = { velocityY: 0, grounded: true, turnSpeed: 2.6 };
 const GROUND_Y = 0;
 const GRAVITY = -28;
-const JUMP_SPEED = 9.5;
+const JUMP_SPEED = 20.0;
 const MOVE_SPEED = 8.5;
 
 const CAR_MAX_SPEED = 22;
@@ -63,6 +63,60 @@ const CAR_FRICTION = 6;
 const CAR_MAX_YAW_RATE = 2.0;
 
 const drivingState = { active: false, vehicle: null };
+
+// --- Carrying Props (blocks, eventually ramps) ---
+let heldProp = null;
+
+function pickUpProp(item) {
+  heldProp = item;
+  item.heldByPlayer = true;
+  player.add(item.mesh); // reparent onto the player - position/yaw follow automatically
+  item.mesh.position.set(0, 1.3, 1.0); // roughly chest-height, out in front
+  item.mesh.rotation.set(0, 0, 0);
+}
+
+function placeHeldProp() {
+  const item = heldProp;
+  const yaw = player.rotation.y;
+  const halfZ = item.collision.bodyHalf.z;
+  const halfX = item.collision.bodyHalf.x;
+  // Try a close spot right in front of the player first, then a bit further
+  // out if that's occupied. If neither is clear, just keep carrying it.
+  const tryDistances = [1.4 + halfZ, 2.4 + halfZ];
+
+  for (const dist of tryDistances) {
+    const spotX = player.position.x + Math.sin(yaw) * dist;
+    const spotZ = player.position.z + Math.cos(yaw) * dist;
+    if (!checkWorldCollisions(spotX, spotZ, Math.max(halfX, halfZ), GROUND_Y, null)) {
+      scene.add(item.mesh); // un-parents back to world space
+      item.mesh.position.set(spotX, 0, spotZ);
+      item.mesh.rotation.set(0, 0, 0);
+      item.x = spotX;
+      item.z = spotZ;
+      item.heldByPlayer = false;
+      heldProp = null;
+      return;
+    }
+  }
+  // No clear spot within reach - stays in hand, try again facing somewhere else.
+}
+
+// --- Riding Pose (motorcycle only - cars just hide the player) ---
+function setRiderPose(active) {
+  if (active) {
+    torso.rotation.x = 0.2;      // lean forward over the tank
+    leftArm.rotation.x = -1.1;   // reach forward to the handlebars
+    rightArm.rotation.x = -1.1;
+    leftLeg.rotation.x = -1.0;   // knees up onto the pegs
+    rightLeg.rotation.x = -1.0;
+  } else {
+    torso.rotation.x = 0;
+    leftArm.rotation.x = 0;
+    rightArm.rotation.x = 0;
+    leftLeg.rotation.x = 0;
+    rightLeg.rotation.x = 0;
+  }
+}
 
 // --- Walk Cycle Animation ---
 let walkTime = 0;
@@ -120,7 +174,7 @@ function updatePlayer(dt) {
 
   // Only snap onto a vehicle roof if we were already at/above it (i.e. falling onto
   // it), not when merely walking into the side of a parked car at ground level.
-  const vehicleTop = findVehicleSurfaceY(player.position.x, player.position.z);
+  const vehicleTop = findStandableSurfaceY(player.position.x, player.position.z);
   const landingY = (vehicleTop !== null && prevY >= vehicleTop - 0.1) ? vehicleTop : GROUND_Y;
 
   if (player.position.y <= landingY) {
@@ -136,14 +190,35 @@ function enterVehicle(v) {
   drivingState.active = true;
   drivingState.vehicle = v;
   v.gear = 'forward';
-  player.visible = false;
+  v.leanAngle = 0;
+
+  if (v.vehicleKind === 'motorcycle') {
+    // Keep the rider visible and parent them to the bike so their position,
+    // yaw, and lean all follow the bike's transform automatically.
+    v.mesh.add(player);
+    player.position.set(0, -0.25, -0.1);
+    player.rotation.set(0, 0, 0);
+    setRiderPose(true);
+    player.visible = true;
+  } else {
+    player.visible = false;
+  }
 }
 
 function exitVehicle() {
   if (!drivingState.active) return;
   const v = drivingState.vehicle;
-  player.position.set(v.x + 2.5, GROUND_Y, v.z);
-  player.rotation.y = v.mesh.rotation.y;
+
+  if (v.vehicleKind === 'motorcycle') {
+    scene.add(player); // un-parents back to world space
+    setRiderPose(false);
+    v.mesh.rotation.z = 0;
+    v.leanAngle = 0;
+  }
+
+  const spot = findVehicleExitSpot(v);
+  player.position.set(spot.x, GROUND_Y, spot.z);
+  player.rotation.set(0, v.mesh.rotation.y, 0);
   player.visible = true;
   drivingState.active = false;
   drivingState.vehicle = null;
@@ -202,5 +277,18 @@ function updateVehicle(dt) {
   }
 
   v.mesh.position.set(v.x, 0, v.z);
-  player.position.set(v.x, v.mesh.position.y, v.z);
+
+  if (v.vehicleKind === 'motorcycle') {
+    // Lean into turns: more lean the harder you're turning and the faster
+    // you're going, eased toward the target so it doesn't snap.
+    const turnInput = (keys.a ? 1 : 0) - (keys.d ? 1 : 0);
+    const speedFactor = Math.min(Math.abs(v.speed) / CAR_MAX_SPEED, 1);
+    const targetLean = -turnInput * 0.4 * (0.3 + 0.7 * speedFactor);
+    v.leanAngle = v.leanAngle + (targetLean - v.leanAngle) * Math.min(dt * 8, 1);
+    v.mesh.rotation.z = v.leanAngle;
+    // Player is parented to v.mesh while riding, so its position/yaw/lean
+    // follow automatically - no world-space player update needed here.
+  } else {
+    player.position.set(v.x, v.mesh.position.y, v.z);
+  }
 }

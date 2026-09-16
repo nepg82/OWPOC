@@ -1,11 +1,12 @@
 function updateCamera() {
   const target = drivingState.active ? drivingState.vehicle.mesh : player;
-  const distance = drivingState.active ? 11.0 : 7.0;
+  const onMotorcycle = drivingState.active && drivingState.vehicle.vehicleKind === 'motorcycle';
+  const distance = onMotorcycle ? 7.5 : (drivingState.active ? 11.0 : 7.0);
   const yaw = target.rotation.y;
 
   const offsetX = -Math.sin(yaw) * distance * Math.cos(cameraPitch);
   const offsetZ = -Math.cos(yaw) * distance * Math.cos(cameraPitch);
-  const offsetY = distance * Math.sin(cameraPitch) + (drivingState.active ? 2.5 : 1.8);
+  const offsetY = distance * Math.sin(cameraPitch) + (onMotorcycle ? 1.8 : (drivingState.active ? 2.5 : 1.8));
 
   const desiredPos = new THREE.Vector3(
     target.position.x + offsetX,
@@ -45,10 +46,23 @@ function updateInteraction() {
   }
 
   if (modalOpen) return;
+
+  if (heldProp) {
+    // Hands are full - SPACE always places, regardless of what's nearby.
+    promptEl.innerHTML = `<kbd>SPACE</kbd> place ${heldProp.name}`;
+    promptEl.classList.add('show');
+    if (spaceJustPressed) placeHeldProp();
+    spaceJustPressed = false;
+    return;
+  }
+
   nearest = findNearestInteractable();
 
   if (nearest) {
-    promptEl.innerHTML = `<kbd>SPACE</kbd> ${nearest.type === 'vehicle' ? 'drive' : 'enter'} ${nearest.name}`;
+    let verb = 'enter';
+    if (nearest.type === 'vehicle') verb = 'drive';
+    if (nearest.type === 'prop') verb = 'pick up';
+    promptEl.innerHTML = `<kbd>SPACE</kbd> ${verb} ${nearest.name}`;
     promptEl.classList.add('show');
   } else {
     promptEl.classList.remove('show');
@@ -57,6 +71,8 @@ function updateInteraction() {
   if (spaceJustPressed && nearest) {
     if (nearest.type === 'vehicle') {
       enterVehicle(nearest);
+    } else if (nearest.type === 'prop') {
+      pickUpProp(nearest);
     } else {
       modalTitle.textContent = nearest.name;
       modalBody.textContent = nearest.blurb;
